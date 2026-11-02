@@ -77,7 +77,7 @@ func TestLegacyResourcePackPlayFlow(t *testing.T) {
 					t.Fatalf("origin response %d = %#v, want status %v", i, original.writtenPackets[i], want)
 				}
 			}
-			// A late response after the tracked request completes has no safe recipient.
+			// 追跡中の要求が完了した後は、遅延応答の安全な転送先を特定できない。
 			runResourcePackFlow(t, func() {
 				clientHandler.HandlePacket(&proto.PacketContext{
 					Packet:  &packet.ResourcePackResponse{Status: packet.SuccessfulResourcePackResponseStatus},

@@ -249,6 +249,20 @@ log:
       in front of a server it did not author, so a command tree it cannot parse must not be a
       session-fatal event. No upstream behavior was ported, so the verified sync point is unchanged.
 
+  - date: 2026-11-21
+    kind: review
+    upstream_range: a7581821fb72a3eb5011f725d8876c91aa7843e1..843a47e2a38325309cd66133149fc9a984f76bb8
+    upstream_commit_count: 11
+    ported: none
+    summary: >-
+      Rechecked PaperMC/Velocity dev/3.0.0 when rebasing the legacy resource pack deadlock fix
+      onto Gate v0.82.0. The head remains 843a47e2, so there are no new upstream commits to assess.
+      At that head LegacyResourcePackHandler uses a nullable Boolean to distinguish an unanswered
+      request from a decline and advances the queue without Gate's reentrant mutex. The Gate fix
+      preserves that three-state distinction and performs callbacks and packet writes outside its
+      lock, retaining each backend connection for delayed responses. No upstream commit was ported;
+      the verified sync point is unchanged.
+
 ```
 
 ## The log

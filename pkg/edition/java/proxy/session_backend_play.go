@@ -318,6 +318,8 @@ func handleResourcePacketRequest(
 		}
 	}
 }
+
+// サーバー切り替え後の遅延応答も要求元へ返せるよう、旧形式では接続を保持する。
 func handleResourcePacketRequest_(
 	p *packet.ResourcePackRequest,
 	serverConn *serverConnection,
@@ -378,7 +380,7 @@ func handleResourcePacketRequest_(
 			}
 		} else {
 			handler := serverConn.player.resourcePackHandler
-			// A queued legacy response may outlive a server switch, and an automatic decline has no client packet to forward.
+			// 旧形式の応答はサーバー切り替え後に届く場合があり、自動拒否には転送元のパケットがない。
 			if legacy, ok := handler.(interface {
 				QueueResourcePackFromBackend(*resourcepack.Info, proto.PacketWriter) error
 			}); ok {

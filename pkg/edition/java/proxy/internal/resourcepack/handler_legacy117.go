@@ -23,6 +23,7 @@ var _ Handler = (*legacy117Handler)(nil)
 func (h *legacy117Handler) shouldDisconnectForForcePack(event *PlayerResourcePackStatusEvent) bool {
 	return h.l.shouldDisconnectForForcePack(event) && !event.OverwriteKick()
 }
+
 func (h *legacy117Handler) OnResourcePackResponse(bundle *ResponseBundle) (bool, error) {
 	return h.l.onResourcePackResponse(bundle, h.shouldDisconnectForForcePack)
 }

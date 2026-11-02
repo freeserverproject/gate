@@ -42,6 +42,7 @@ type legacyHandler struct {
 	appliedPack          *Info
 }
 
+// 未回答と拒否を区別し、最初のパックを必ず提示できるようにする。
 func newLegacyHandler(player Player, eventMgr event.Manager) *legacyHandler {
 	return &legacyHandler{
 		player:               player,
@@ -98,12 +99,12 @@ func (h *legacyHandler) QueueResourcePack(info *Info) error {
 	return h.queueResourcePack(info, nil)
 }
 
-// QueueResourcePackFromBackend retains the request's connection for responses,
-// including automatic declines that have no client packet to forward.
+// 自動拒否にはクライアントの応答パケットがないため、要求元の接続を保持する。
 func (h *legacyHandler) QueueResourcePackFromBackend(info *Info, backend proto.PacketWriter) error {
 	return h.queueResourcePack(info, backend)
 }
 
+// コールバックや書き込みから再入できるよう、ロックを解放してからキューを進める。
 func (h *legacyHandler) queueResourcePack(info *Info, backend proto.PacketWriter) error {
 	if info == nil {
 		return errors.New("resource pack info is nil")
@@ -119,7 +120,7 @@ func (h *legacyHandler) queueResourcePack(info *Info, backend proto.PacketWriter
 	return nil
 }
 
-// startQueueLocked prevents concurrent callers from starting competing queue runners.
+// 複数の呼び出し元がキューを同時に進めることを防ぐ。
 func (h *legacyHandler) startQueueLocked() bool {
 	if h.advancing || h.responding || h.activePack != nil || h.outstandingPacks.Len() == 0 {
 		return false
@@ -128,8 +129,7 @@ func (h *legacyHandler) startQueueLocked() bool {
 	return true
 }
 
-// owner is the request whose caller is still waiting for a queue result. Errors
-// for other requests must not make that caller decline the wrong request.
+// owner 以外の要求のエラーを呼び出し元に返すと、別のパックを誤って拒否してしまう。
 func (h *legacyHandler) tickResourcePackQueue(owner *legacyQueuedPack) error {
 	var result error
 	for {
@@ -144,7 +144,7 @@ func (h *legacyHandler) tickResourcePackQueue(owner *legacyQueuedPack) error {
 		decline := h.prevResourceResponse == legacyResponseDeclined &&
 			(!queued.info.ShouldForce || !supportsForced)
 		if decline {
-			// A 1.17+ forced prompt can override an earlier rejection; optional prompts cannot.
+			// 1.17 以降の必須パックは過去に拒否していても再度提示できる。
 			h.outstandingPacks.PopFront()
 			h.responding = true
 			h.Unlock()
@@ -162,7 +162,7 @@ func (h *legacyHandler) tickResourcePackQueue(owner *legacyQueuedPack) error {
 			continue
 		}
 
-		// Reserve the head before writing so concurrent enqueues cannot send it twice.
+		// 同時に追加された要求による二重送信を防ぐため、書き込み前に先頭を予約する。
 		h.activePack = queued
 		h.Unlock()
 		err := h.SendResourcePackRequestPacket(queued.info)
@@ -181,11 +181,11 @@ func (h *legacyHandler) tickResourcePackQueue(owner *legacyQueuedPack) error {
 		}
 		h.Unlock()
 		if !stillActive {
-			// A terminal response already completed this request while the write was finishing.
+			// 書き込み中に終端応答が届き、この要求はすでに完了している。
 			continue
 		}
 		if owner != queued && queued.backend != nil {
-			// A queued caller has already returned, so it cannot report this send failure.
+			// キュー追加時の呼び出し元はすでに戻っており、この送信エラーを返せない。
 			err = errors.Join(err, queued.backend.WritePacket((&ResponseBundle{
 				ID:     queued.info.ID,
 				Hash:   Hash(hex.EncodeToString(queued.info.Hash)),
@@ -202,6 +202,7 @@ func (h *legacyHandler) OnResourcePackResponse(bundle *ResponseBundle) (bool, er
 	return h.onResourcePackResponse(bundle, h.shouldDisconnectForForcePack)
 }
 
+// 応答の配送が終わるまでキューを止め、再入時も応答順を維持する。
 func (h *legacyHandler) onResourcePackResponse(
 	bundle *ResponseBundle,
 	shouldDisconnectForForcePack func(e *PlayerResourcePackStatusEvent) bool,
@@ -210,10 +211,10 @@ func (h *legacyHandler) onResourcePackResponse(
 	queued := h.activePack
 	if queued == nil {
 		h.Unlock()
-		// Without an active request there is no safe backend to forward a late response to.
+		// 対応する要求がなければ、遅延応答の安全な転送先を特定できない。
 		return true, nil
 	}
-	// Legacy responses generally have no ID; use it when available and suppress repeated accepts.
+	// 旧形式の応答には通常 ID がないため、存在する場合のみ照合する。
 	if (bundle.ID != uuid.Nil && queued.info.ID != uuid.Nil && bundle.ID != queued.info.ID) ||
 		(bundle.Status == AcceptedResponseStatus && h.pendingPack == queued.info) {
 		h.Unlock()
@@ -224,7 +225,7 @@ func (h *legacyHandler) onResourcePackResponse(
 		h.outstandingPacks.PopFront()
 		h.activePack = nil
 		h.pendingPack = nil
-		// Keep the next request queued until this response write finishes, even if callbacks enqueue more.
+		// コールバックから要求が追加されても、応答の書き込みが終わるまで次を送らない。
 		h.responding = true
 	}
 	switch bundle.Status {
@@ -257,12 +258,12 @@ func (h *legacyHandler) onResourcePackResponse(
 	return handled, err
 }
 
+// コールバックや書き込みは再入し得るため、ロックの外で実行する。
 func (h *legacyHandler) dispatchResponse(
 	queued *legacyQueuedPack,
 	bundle *ResponseBundle,
 	shouldDisconnectForForcePack func(e *PlayerResourcePackStatusEvent) bool,
 ) (bool, error) {
-	// Event callbacks and packet writes may reenter this handler; never invoke them under its lock.
 	e := newPlayerResourcePackStatusEvent(h.player, bundle.Status, bundle.ID, *queued.info)
 	event.FireParallel(h.eventMgr, e, func(e *PlayerResourcePackStatusEvent) {
 		if shouldDisconnectForForcePack(e) {

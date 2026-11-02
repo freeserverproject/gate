@@ -24,6 +24,7 @@ type legacyTestPlayer struct {
 }
 
 func (p *legacyTestPlayer) Protocol() proto.Protocol { return p.protocol }
+
 func (p *legacyTestPlayer) WritePacket(packet proto.Packet) error {
 	if p.write != nil {
 		return p.write(packet)
